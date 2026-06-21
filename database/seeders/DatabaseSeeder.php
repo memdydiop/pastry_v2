@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Enums\InventoryMovementType;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class DatabaseSeeder extends Seeder
@@ -20,6 +21,16 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        if (!User::where('is_super_admin', true)->exists()) {
+            User::create([
+                'name' => 'Super Admin',
+                'email' => 'super-admin@pastrysaas.com',
+                'password' => Hash::make(Str::random(32)),
+                'is_super_admin' => true,
+                'is_active' => true,
+            ]);
+        }
+
         $this->call(RoleAndPermissionSeeder::class);
 
         $user = User::firstOrCreate(
