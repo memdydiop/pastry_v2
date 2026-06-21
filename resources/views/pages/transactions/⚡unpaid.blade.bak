@@ -1,0 +1,516 @@
+<?php
+
+use Livewire\Component;
+use Livewire\WithPagination;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentMethod;
+use App\Enums\TransactionType;
+use App\Models\Order;
+use App\Models\Transaction;
+use Illuminate\Validation\Rule;
+
+new #[Title('Encaissements - Commandes non soldées')] class extends Component {
+    use WithPagination;
+
+    public $search = '';
+    public $perPage = 15;
+
+    public $showPaymentModal = false;
+    public $payingOrderId = null;
+    public $paymentAmount = 0;
+    public $paymentMethod = '';
+    public $paymentExternalRef = '';
+    public $paymentNotes = '';
+
+    public $showCancelModal = false;
+    public $cancellingTransaction = null;
+    public $cancellationReason = '';
+
+    public $showEditModal = false;
+    public $editingTransaction = null;
+    public $editAmount = 0;
+    public $editMethod = '';
+    public $editExternalRef = '';
+    public $editNotes = '';
+
+    public $showTransactionsModal = false;
+    public $viewingOrderId = null;
+
+    public function updatedSearch() { $this->resetPage(); }
+    public function updatedPerPage() { $this->resetPage(); }
+
+    public function clearFilters()
+    {
+        $this->reset('search');
+        $this->resetPage();
+    }
+
+    public function openPaymentModal(int $orderId): void
+    {
+        $order = Order::findOrFail($orderId);
+        $this->payingOrderId = $orderId;
+        $this->paymentAmount = max(0, floatval($order->remaining_balance));
+        $this->paymentMethod = '';
+        $this->paymentExternalRef = '';
+        $this->paymentNotes = '';
+        $this->showPaymentModal = true;
+    }
+
+    public function processPayment(): void
+    {
+        $this->validate([
+            'paymentAmount' => 'required|numeric|min:1',
+            'paymentMethod' => ['required', Rule::enum(PaymentMethod::class)],
+            'paymentExternalRef' => 'nullable|string|max:255',
+            'paymentNotes' => 'nullable|string|max:1000',
+        ]);
+
+        $order = Order::findOrFail($this->payingOrderId);
+
+        $order->transactions()->create([
+            'type' => TransactionType::PAYMENT->value,
+            'amount' => $this->paymentAmount,
+            'payment_method' => $this->paymentMethod,
+            'external_ref' => $this->paymentExternalRef ?: null,
+            'notes' => $this->paymentNotes ?: null,
+            'paid_at' => now(),
+            'reference' => Transaction::generateReference('PAY'),
+            'user_id' => auth()->id(),
+        ]);
+
+        $this->dispatch('toast', variant: 'success', heading: 'Paiement enregistré.');
+        $this->showPaymentModal = false;
+        $this->payingOrderId = null;
+    }
+
+    public function openCancelModal(int $transactionId): void
+    {
+        $this->cancellingTransaction = Transaction::with('order', 'user')->findOrFail($transactionId);
+        $this->cancellationReason = '';
+        $this->showCancelModal = true;
+    }
+
+    public function processCancel(): void
+    {
+        $this->validate([
+            'cancellationReason' => 'required|string|min:3|max:1000',
+        ]);
+
+        $this->cancellingTransaction->cancel($this->cancellationReason);
+
+        $this->dispatch('toast', variant: 'success', heading: 'Paiement annulé.');
+        $this->showCancelModal = false;
+        $this->cancellingTransaction = null;
+    }
+
+    public function openEditModal(int $transactionId): void
+    {
+        $this->editingTransaction = Transaction::with('order', 'user')->findOrFail($transactionId);
+        $this->editAmount = floatval($this->editingTransaction->amount);
+        $this->editMethod = $this->editingTransaction->payment_method?->value ?? '';
+        $this->editExternalRef = $this->editingTransaction->external_ref ?? '';
+        $this->editNotes = $this->editingTransaction->notes ?? '';
+        $this->showEditModal = true;
+    }
+
+    public function processEdit(): void
+    {
+        $this->validate([
+            'editAmount' => 'required|numeric|min:1',
+            'editMethod' => ['required', Rule::enum(PaymentMethod::class)],
+            'editExternalRef' => 'nullable|string|max:255',
+            'editNotes' => 'nullable|string|max:1000',
+        ]);
+
+        $this->editingTransaction->edit([
+            'amount' => $this->editAmount,
+            'payment_method' => $this->editMethod,
+            'external_ref' => $this->editExternalRef ?: null,
+            'notes' => $this->editNotes ?: null,
+        ]);
+
+        $this->dispatch('toast', variant: 'success', heading: 'Paiement modifié.');
+        $this->showEditModal = false;
+        $this->editingTransaction = null;
+    }
+
+    public function openTransactionsModal(int $orderId): void
+    {
+        $this->viewingOrderId = $orderId;
+        $this->showTransactionsModal = true;
+    }
+
+    public function closeTransactionsModal(): void
+    {
+        $this->viewingOrderId = null;
+        $this->showTransactionsModal = false;
+    }
+
+    public function with(): array
+    {
+        $query = Order::with(['transactions' => fn($q) => $q->notCancelled()->latest('paid_at')])
+            ->notCancelled()
+            ->unsettled()
+            ->latest('created_at');
+
+        if (!empty($this->search)) {
+            $query->where(function ($q) {
+                $q->where('reference', 'like', '%' . $this->search . '%')
+                  ->orWhere('client_name', 'like', '%' . $this->search . '%')
+                  ->orWhere('client_phone', 'like', '%' . $this->search . '%');
+            });
+        }
+
+        return [
+            'orders' => $query->paginate($this->perPage),
+            'isFiltered' => !empty($this->search),
+            'paymentMethods' => PaymentMethod::cases(),
+            'totalPayments' => Transaction::where('type', 'payment')
+                ->notCancelled()
+                ->whereHas('order', fn($q) => $q->unsettled())
+                ->sum('amount'),
+            'unsettledOrders' => Order::notCancelled()->unsettled()->count(),
+            'totalOutstanding' => Order::notCancelled()
+                ->selectRaw('SUM(total_amount - ' . Order::netPaidSubquery() . ') as outstanding', [TransactionType::PAYMENT->value, TransactionType::REFUND->value])
+                ->unsettled()
+                ->value('outstanding'),
+            'viewingOrderTransactions' => $this->viewingOrderId
+                ? Order::with(['transactions' => fn($q) => $q->notCancelled()->latest('paid_at')])
+                    ->find($this->viewingOrderId)
+                : null,
+        ];
+    }
+}; ?>
+
+<div class="space-y-6">
+    <x-page-heading
+        :title="'Encaissements – Commandes non soldées'"
+        :subtitle="'Commandes avec un solde restant dû et enregistrement d\'encaissements.'">
+        <x-slot:breadcrumbs>
+            <flux:breadcrumbs.item>Finance</flux:breadcrumbs.item>
+            <flux:breadcrumbs.item :href="route('transactions.index')" wire:navigate>Transactions</flux:breadcrumbs.item>
+            <flux:breadcrumbs.item>Non soldées</flux:breadcrumbs.item>
+        </x-slot:breadcrumbs>
+    </x-page-heading>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <flux:card class="border border-amber-200/80 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20">
+            <div class="p-4">
+                <flux:text size="xs" class="text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">Commandes non soldées</flux:text>
+                <div class="text-2xl font-black text-amber-700 dark:text-amber-300 mt-1">
+                    {{ $unsettledOrders }}
+                </div>
+            </div>
+        </flux:card>
+
+        <flux:card class="border border-red-200/80 dark:border-red-800/60 bg-red-50/50 dark:bg-red-950/20">
+            <div class="p-4">
+                <flux:text size="xs" class="text-red-600 dark:text-red-400 font-semibold uppercase tracking-wider">Solde total dû</flux:text>
+                <div class="text-2xl font-black text-red-700 dark:text-red-300 mt-1">
+                    {{ number_format($totalOutstanding ?? 0, 0, ',', ' ') }} <span class="text-sm font-normal">FCFA</span>
+                </div>
+            </div>
+        </flux:card>
+
+        <flux:card class="border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20">
+            <div class="p-4">
+                <flux:text size="xs" class="text-emerald-600 dark:text-emerald-400 font-semibold uppercase tracking-wider">Total Encaissements</flux:text>
+                <div class="text-2xl font-black text-emerald-700 dark:text-emerald-300 mt-1">
+                    {{ number_format($totalPayments, 0, ',', ' ') }} <span class="text-sm font-normal">FCFA</span>
+                </div>
+            </div>
+        </flux:card>
+    </div>
+
+    <flux:card class="border border-zinc-200/80 dark:border-zinc-700/80 bg-white dark:bg-zinc-900 shadow-xs p-0">
+        <x-card.card-header :title="'Commandes avec solde restant'" :subtitle="'Enregistrez un encaissement pour solder la commande.'" />
+
+        <x-card.card-body class="p-0">
+            <x-card.table-filters
+                search-placeholder="Rechercher commande, client..."
+                search-binding="search"
+                :has-active-filters="$isFiltered"
+            />
+
+            @if($orders->isEmpty())
+                <div class="text-center py-16 bg-zinc-50/50 dark:bg-zinc-950/20">
+                    <div class="size-12 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 flex items-center justify-center text-xl mx-auto shadow-xs">
+                        💰
+                    </div>
+                    <flux:heading class="mt-4 font-bold text-zinc-900 dark:text-white">Aucune commande non soldée</flux:heading>
+                    <flux:text size="sm" class="mt-1 text-zinc-400 dark:text-zinc-500">Toutes les commandes sont intégralement payées.</flux:text>
+                </div>
+            @else
+                <flux:table>
+                    <flux:table.columns>
+                        <flux:table.column>Commande</flux:table.column>
+                        <flux:table.column>Total</flux:table.column>
+                        <flux:table.column>Versé</flux:table.column>
+                        <flux:table.column>Solde</flux:table.column>
+                        <flux:table.column>Paiements</flux:table.column>
+                        <flux:table.column class="text-end">Actions</flux:table.column>
+                    </flux:table.columns>
+
+                    <flux:table.rows>
+                        @foreach($orders as $order)
+                            @php
+                                $paid = $order->total_paid;
+                                $remaining = $order->remaining_balance;
+                                $paymentsCount = $order->transactions->where('type', App\Enums\TransactionType::PAYMENT)->count();
+                            @endphp
+                            <flux:table.row :key="$order->id">
+                                <flux:table.cell>
+                                    <div class="text-sm font-medium">
+                                        <a href="{{ route('orders.show', $order) }}" class="hover:underline text-indigo-600 dark:text-indigo-400">
+                                            {{ $order->reference }}
+                                        </a>
+                                    </div>
+                                    <div class="text-xs text-zinc-400">{{ $order->client_name }}</div>
+                                </flux:table.cell>
+
+                                <flux:table.cell>
+                                    <span class="font-semibold text-zinc-900 dark:text-white">
+                                        {{ number_format($order->total_amount, 0, ',', ' ') }}
+                                    </span>
+                                    <span class="text-[10px] text-zinc-400">FCFA</span>
+                                </flux:table.cell>
+
+                                <flux:table.cell>
+                                    <span class="font-semibold text-zinc-900 dark:text-white">
+                                        {{ number_format($paid, 0, ',', ' ') }}
+                                    </span>
+                                    <span class="text-[10px] text-zinc-400">FCFA</span>
+                                </flux:table.cell>
+
+                                <flux:table.cell>
+                                    <span class="font-semibold {{ $remaining > 0 ? 'text-red-600' : 'text-emerald-600' }}">
+                                        {{ number_format($remaining, 0, ',', ' ') }}
+                                    </span>
+                                    <span class="text-[10px] text-zinc-400">FCFA</span>
+                                </flux:table.cell>
+
+                                <flux:table.cell>
+                                    <span class="text-sm text-zinc-500">
+                                        {{ $paymentsCount }} paiement{{ $paymentsCount > 1 ? 's' : '' }}
+                                    </span>
+                                </flux:table.cell>
+
+                                <flux:table.cell class="text-end">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <flux:button size="sm" variant="primary" icon="plus" class="cursor-pointer"
+                                            wire:click="openPaymentModal({{ $order->id }})">
+                                            Encaisser
+                                        </flux:button>
+
+                                        @if($order->transactions->isNotEmpty())
+                                            <flux:dropdown position="bottom" align="end">
+                                                <flux:button icon="ellipsis-horizontal" size="sm" variant="ghost" class="cursor-pointer" title="Actions" />
+                                                <flux:menu>
+                                                    <flux:menu.item icon="clock" wire:click="openTransactionsModal({{ $order->id }})">
+                                                        Historique des paiements
+                                                    </flux:menu.item>
+                                                    @if($order->transactions->isNotEmpty())
+                                                        <flux:menu.separator />
+                                                        @php $lastTxn = $order->transactions->first(); @endphp
+                                                        <flux:menu.item icon="pencil-square"
+                                                            wire:click="openEditModal({{ $lastTxn->id }})">
+                                                            Modifier dernier paiement
+                                                        </flux:menu.item>
+                                                        <flux:menu.item icon="x-circle"
+                                                            wire:click="openCancelModal({{ $lastTxn->id }})">
+                                                            Annuler dernier paiement
+                                                        </flux:menu.item>
+                                                    @endif
+                                                </flux:menu>
+                                            </flux:dropdown>
+                                        @endif
+                                    </div>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+
+                @if($orders->hasPages())
+                    <div class="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+                        {{ $orders->links() }}
+                    </div>
+                @endif
+            @endif
+        </x-card.card-body>
+    </flux:card>
+
+    {{-- Modal : Enregistrer un encaissement --}}
+    <flux:modal name="payment-modal" wire:model="showPaymentModal" class="max-w-lg space-y-6">
+        <form wire:submit.prevent="processPayment" class="space-y-6">
+            <div>
+                <flux:heading size="lg">Enregistrer un encaissement</flux:heading>
+                <flux:subheading>Ce paiement sera ajouté au solde de la commande.</flux:subheading>
+            </div>
+
+            <div class="space-y-4">
+                <flux:input type="number" wire:model="paymentAmount" label="Montant" required size="sm"
+                    step="0.01" />
+
+                <flux:select wire:model="paymentMethod" label="Moyen de paiement" required size="sm">
+                    @foreach($paymentMethods as $p)
+                        <option value="{{ $p->value }}">{{ $p->label() }}</option>
+                    @endforeach
+                </flux:select>
+
+                <flux:input wire:model="paymentExternalRef" label="N° Transaction / Mobile (optionnel)"
+                    placeholder="Ex: WAVE-123ABC, OM-456789..." size="sm" />
+
+                <flux:textarea wire:model="paymentNotes" label="Notes (optionnel)" rows="2" size="sm" />
+            </div>
+
+            <div class="flex gap-2 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <flux:button variant="ghost" wire:click="$set('showPaymentModal', false)">Retour</flux:button>
+                <flux:button type="submit" variant="primary" class="cursor-pointer" icon="check">
+                    Enregistrer le paiement
+                </flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    {{-- Modal : Annuler un paiement --}}
+    <flux:modal name="cancel-modal" wire:model="showCancelModal" class="max-w-lg space-y-6">
+        @if($cancellingTransaction)
+            <form wire:submit.prevent="processCancel" class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Annuler le paiement</flux:heading>
+                    <flux:subheading>Ce paiement sera marqué comme annulé et ne sera plus comptabilisé dans le solde de la commande.</flux:subheading>
+                </div>
+
+                <div class="bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Transaction</span>
+                        <span class="font-mono text-xs">{{ $cancellingTransaction->reference }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Commande</span>
+                        <span>{{ $cancellingTransaction->order?->reference }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Client</span>
+                        <span>{{ $cancellingTransaction->order?->client_name }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm font-semibold border-t border-zinc-200 dark:border-zinc-800 pt-2 mt-2">
+                        <span>Montant</span>
+                        <span>{{ number_format($cancellingTransaction->amount, 0, ',', ' ') }} FCFA</span>
+                    </div>
+                </div>
+
+                <flux:textarea wire:model="cancellationReason" label="Motif d'annulation" required
+                    placeholder="Ex: Paiement enregistré par erreur, client n'a pas finalisé le paiement..."
+                    rows="3" size="sm" />
+
+                <div class="flex gap-2 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <flux:button variant="ghost" wire:click="$set('showCancelModal', false)">Retour</flux:button>
+                    <flux:button type="submit" variant="danger" class="cursor-pointer" icon="x-circle">
+                        Confirmer l'annulation
+                    </flux:button>
+                </div>
+            </form>
+        @endif
+    </flux:modal>
+
+    {{-- Modal : Modifier un paiement --}}
+    <flux:modal name="edit-modal" wire:model="showEditModal" class="max-w-lg space-y-6">
+        @if($editingTransaction)
+            <form wire:submit.prevent="processEdit" class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Modifier le paiement</flux:heading>
+                    <flux:subheading>Les anciennes valeurs seront conservées pour l'audit.</flux:subheading>
+                </div>
+
+                <div class="bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Transaction</span>
+                        <span class="font-mono text-xs">{{ $editingTransaction->reference }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Commande</span>
+                        <span>{{ $editingTransaction->order?->reference }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-zinc-500">Client</span>
+                        <span>{{ $editingTransaction->order?->client_name }}</span>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <flux:input type="number" wire:model="editAmount" label="Montant" required size="sm" />
+
+                    <flux:select wire:model="editMethod" label="Moyen de paiement" size="sm">
+                        @foreach(App\Enums\PaymentMethod::cases() as $p)
+                            <option value="{{ $p->value }}">{{ $p->label() }}</option>
+                        @endforeach
+                    </flux:select>
+
+                    <flux:input wire:model="editExternalRef" label="N° Transaction / Mobile (optionnel)" placeholder="Ex: WAVE-123ABC, OM-456789..." size="sm" />
+
+                    <flux:textarea wire:model="editNotes" label="Notes (optionnel)" rows="2" size="sm" />
+                </div>
+
+                <div class="flex gap-2 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <flux:button variant="ghost" wire:click="$set('showEditModal', false)">Retour</flux:button>
+                    <flux:button type="submit" variant="primary" class="cursor-pointer" icon="check">
+                        Enregistrer les modifications
+                    </flux:button>
+                </div>
+            </form>
+        @endif
+    </flux:modal>
+
+    {{-- Modal : Historique des paiements --}}
+    <flux:modal name="transactions-modal" wire:model="showTransactionsModal" class="max-w-lg space-y-6">
+        @if($viewingOrderTransactions)
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Historique des paiements</flux:heading>
+                    <flux:subheading>{{ $viewingOrderTransactions->reference }} — {{ $viewingOrderTransactions->client_name }}</flux:subheading>
+                </div>
+
+                @php $txns = $viewingOrderTransactions->transactions->where('type', App\Enums\TransactionType::PAYMENT); @endphp
+
+                @if($txns->isEmpty())
+                    <div class="text-center py-8 text-zinc-400">
+                        Aucun paiement enregistré sur cette commande.
+                    </div>
+                @else
+                    <div class="space-y-3">
+                        @foreach($txns as $txn)
+                            <div class="flex items-center justify-between bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                <div>
+                                    <div class="text-sm font-medium text-zinc-900 dark:text-white">
+                                        {{ number_format($txn->amount, 0, ',', ' ') }} FCFA
+                                    </div>
+                                    <div class="text-xs text-zinc-500 mt-0.5">
+                                        <flux:badge size="sm" variant="neutral" class="px-1.5 py-0">
+                                            {{ $txn->payment_method?->label() ?? $txn->payment_method }}
+                                        </flux:badge>
+                                        <span class="ml-2">{{ $txn->paid_at->format('d/m/Y H:i') }}</span>
+                                    </div>
+                                    @if($txn->reference)
+                                        <div class="text-[11px] text-zinc-400 mt-0.5 font-mono">{{ $txn->reference }}</div>
+                                    @endif
+                                </div>
+                                <div class="flex gap-1">
+                                    <flux:button icon="pencil-square" size="xs" variant="ghost" class="cursor-pointer"
+                                        wire:click="openEditModal({{ $txn->id }})" title="Modifier" />
+                                    <flux:button icon="x-circle" size="xs" variant="ghost" class="cursor-pointer text-red-500"
+                                        wire:click="openCancelModal({{ $txn->id }})" title="Annuler" />
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+
+                <div class="flex gap-2 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <flux:button variant="ghost" wire:click="closeTransactionsModal">Fermer</flux:button>
+                </div>
+            </div>
+        @endif
+    </flux:modal>
+</div>
