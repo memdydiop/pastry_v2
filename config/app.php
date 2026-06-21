@@ -128,4 +128,6 @@ return [
 
     'per_page' => env('PER_PAGE', 15),
 
+    'central_domain' => env('CENTRAL_DOMAIN', 'pastrysaas.com'),
+
 ];

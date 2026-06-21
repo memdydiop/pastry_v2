@@ -3,8 +3,6 @@
 use App\Http\Controllers\InvoiceController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/welcome', 'welcome')->name('home');
-
 Route::middleware('guest')->group(function () {
     Route::livewire('/setup-password', 'pages::auth.setup-password')->name('setup-password');
 });
