@@ -17,5 +17,5 @@ Route::post('/super-admin/login', [SuperAdminLoginController::class, 'store'])
 Route::post('/webhooks/cinetpay', [CinetPayWebhookController::class, 'handle'])
     ->name('webhooks.cinetpay');
 
-Route::livewire('/onboarding', 'onboarding')->name('onboarding');
-Route::livewire('/onboarding/success', 'onboarding-success')->name('onboarding.success');
+Route::livewire('/onboarding', 'pages::onboarding')->name('onboarding');
+Route::livewire('/onboarding/success', 'pages::onboarding-success')->name('onboarding.success');

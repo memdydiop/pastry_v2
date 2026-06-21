@@ -16,7 +16,7 @@
                     <a href="#features" class="text-neutral-400 hover:text-white transition-colors">Fonctionnalités</a>
                     <a href="#pricing" class="text-neutral-400 hover:text-white transition-colors">Tarifs</a>
                     <a href="{{ route('super-admin.login') }}" class="text-neutral-400 hover:text-white transition-colors">Administration</a>
-                    <flux:button href="{{ route('onboarding') }}" variant="primary" size="sm" class="!bg-amber-400 !text-neutral-950 hover:!bg-amber-300">
+                    <flux:button href="{{ route('onboarding') }}" variant="primary"  size="sm" class="bg-amber-400! text-neutral-950! hover:bg-amber-300!">
                         Commencer
                     </flux:button>
                 </nav>
@@ -40,10 +40,10 @@
                         simple et adaptée aux besoins des pâtisseries en Afrique.
                     </p>
                     <div class="mt-10 flex items-center justify-center gap-4">
-                        <flux:button href="{{ route('onboarding') }}" variant="primary" size="lg" class="!bg-amber-400 !text-neutral-950 hover:!bg-amber-300">
+                        <flux:button href="{{ route('onboarding') }}" variant="primary" size="sm" class="bg-amber-400! text-neutral-950! hover:bg-amber-300!">
                             Démarrer maintenant
                         </flux:button>
-                        <flux:button href="#features" size="lg" class="!border-white/10 !text-white hover:!bg-white/5">
+                        <flux:button href="#features" size="sm" class="border-white/10! text-white! hover:bg-white/5!">
                             En savoir plus
                         </flux:button>
                     </div>
@@ -122,7 +122,7 @@
                                         </li>
                                     @endforeach
                                 </ul>
-                                <flux:button href="{{ route('onboarding', ['plan' => $plan->id]) }}" class="mt-8 w-full" variant="primary" size="lg" @class(['!bg-amber-400 !text-neutral-950 hover:!bg-amber-300' => $loop->index === 1])>
+                                <flux:button href="{{ route('onboarding', ['plan' => $plan->id]) }}" class="mt-8 w-full" variant="primary" size="sm" @class(['!bg-amber-400 !text-neutral-950 hover:!bg-amber-300' => $loop->index === 1])>
                                     {{ $plan->price > 0 ? 'S\'abonner' : 'Commencer gratuitement' }}
                                 </flux:button>
                             </div>
@@ -136,7 +136,7 @@
                     <h2 class="text-3xl font-bold sm:text-4xl">Prêt à moderniser votre pâtisserie ?</h2>
                     <p class="mt-4 text-neutral-400">Créez votre compte en quelques minutes. Aucune carte bancaire requise.</p>
                     <div class="mt-10 flex items-center justify-center gap-4">
-                        <flux:button href="{{ route('onboarding') }}" variant="primary" size="lg" class="!bg-amber-400 !text-neutral-950 hover:!bg-amber-300">
+                        <flux:button href="{{ route('onboarding') }}" variant="primary" size="sm" class="bg-amber-400! text-neutral-950! hover:bg-amber-300!">
                             Commencer gratuitement
                         </flux:button>
                     </div>
