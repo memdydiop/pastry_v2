@@ -32,6 +32,7 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->call(RoleAndPermissionSeeder::class);
+        $this->call(PlanSeeder::class);
 
         $user = User::firstOrCreate(
             ['email' => 'ghost@user.com'],
