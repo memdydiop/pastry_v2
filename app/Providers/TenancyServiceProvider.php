@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Listeners\SetupNewTenant;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 use Stancl\Tenancy\Events\TenancyInitialized;
 use Stancl\Tenancy\Events\TenancyEnded;
+use Stancl\Tenancy\Events\TenantCreated;
 use Stancl\Tenancy\Listeners\BootstrapTenancy;
 use Stancl\Tenancy\Listeners\RevertToCentralContext;
 
@@ -34,5 +36,7 @@ class TenancyServiceProvider extends ServiceProvider
         Event::listen(TenancyEnded::class, function () {
             app(PermissionRegistrar::class)->setPermissionsTeamId(null);
         });
+
+        Event::listen(TenantCreated::class, SetupNewTenant::class);
     }
 }

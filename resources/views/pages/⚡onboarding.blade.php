@@ -1,9 +1,11 @@
 <?php
 
 use App\Models\Plan;
+use App\Models\Tenant;
 use App\Services\CinetPayService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -66,7 +68,7 @@ new #[Layout('layouts::auth')] #[Title('Créer mon compte')] class extends Compo
             return;
         }
 
-        $transactionId = (string) \Illuminate\Support\Str::uuid();
+        $transactionId = (string) Str::uuid();
 
         Session::put("onboarding.{$transactionId}", [
             'company_name' => $this->company_name,
@@ -97,9 +99,9 @@ new #[Layout('layouts::auth')] #[Title('Créer mon compte')] class extends Compo
 
     public function createTenant(Plan $plan): void
     {
-        $tenantId = (string) \Illuminate\Support\Str::uuid();
+        $tenantId = (string) Str::uuid();
 
-        $tenant = \App\Models\Tenant::create([
+        $tenant = Tenant::create([
             'id' => $tenantId,
             'data' => [
                 'company_name' => $this->company_name,
@@ -108,8 +110,9 @@ new #[Layout('layouts::auth')] #[Title('Créer mon compte')] class extends Compo
             ],
         ]);
 
+        $domain = Str::slug($this->company_name) . '.' . config('app.central_domain');
         $tenant->domains()->create([
-            'domain' => \Illuminate\Support\Str::slug($this->company_name) . '.' . config('app.central_domain'),
+            'domain' => $domain,
             'is_primary' => true,
         ]);
 
@@ -120,7 +123,22 @@ new #[Layout('layouts::auth')] #[Title('Créer mon compte')] class extends Compo
             'status' => 'active',
         ]);
 
-        $this->redirect(route('onboarding.success'));
+        tenancy()->initialize($tenant);
+
+        $user = \App\Models\User::create([
+            'name' => $this->company_name,
+            'email' => $this->email,
+            'phone' => $this->phone,
+            'password' => Hash::make($this->password),
+            'is_active' => true,
+        ]);
+        $user->assignRole('Gérant/Admin');
+
+        \App\Models\Setting::setValue('company_name', $this->company_name);
+
+        tenancy()->end();
+
+        $this->redirect("http://{$domain}:8000/login");
     }
 
     public function getPlansProperty()

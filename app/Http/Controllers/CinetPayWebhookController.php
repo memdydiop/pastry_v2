@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Plan;
+use App\Models\Setting;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -16,10 +19,8 @@ class CinetPayWebhookController extends Controller
 
         $transactionId = $request->input('transaction_id');
         $status = $request->input('status');
-        $amount = $request->input('amount');
-        $customerEmail = $request->input('customer_email');
-        $customerPhone = $request->input('customer_phone_number');
-        $metadata = $request->input('metadata', []);
+        $customerEmail = $request->input('customer_email') ?? $request->input('customer_email');
+        $customerPhone = $request->input('customer_phone_number') ?? '';
 
         if ($status !== 'ACCEPTED') {
             Log::info('CinetPay payment not accepted', ['transaction_id' => $transactionId, 'status' => $status]);
@@ -41,6 +42,7 @@ class CinetPayWebhookController extends Controller
         }
 
         $tenantId = (string) Str::uuid();
+        $domain = Str::slug($sessionData['company_name']) . '.' . config('app.central_domain');
 
         $tenant = Tenant::create([
             'id' => $tenantId,
@@ -52,7 +54,7 @@ class CinetPayWebhookController extends Controller
         ]);
 
         $tenant->domains()->create([
-            'domain' => Str::slug($sessionData['company_name']) . '.' . config('app.central_domain'),
+            'domain' => $domain,
             'is_primary' => true,
         ]);
 
@@ -63,9 +65,23 @@ class CinetPayWebhookController extends Controller
             'status' => 'active',
         ]);
 
+        tenancy()->initialize($tenant);
+
+        User::create([
+            'name' => $sessionData['company_name'],
+            'email' => $customerEmail,
+            'phone' => $customerPhone,
+            'password' => $sessionData['password'],
+            'is_active' => true,
+        ])->assignRole('Gérant/Admin');
+
+        Setting::setValue('company_name', $sessionData['company_name']);
+
+        tenancy()->end();
+
         session()->forget("onboarding.{$transactionId}");
 
-        Log::info('Tenant created successfully from onboarding', [
+        Log::info('Tenant created successfully from webhook', [
             'tenant_id' => $tenantId,
             'company' => $sessionData['company_name'],
             'plan' => $plan->name,

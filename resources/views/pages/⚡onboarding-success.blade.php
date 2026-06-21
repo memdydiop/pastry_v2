@@ -16,12 +16,11 @@ new #[Layout('layouts::auth')] #[Title('Compte créé')] class extends Component
     <x-auth-header title="Félicitations !" description="Votre compte a été créé avec succès." />
 
     <p class="text-sm text-neutral-400">
-        Nous préparons votre espace. Vous recevrez un email avec vos identifiants de connexion
-        et les instructions pour accéder à votre tableau de bord.
+        Votre espace est prêt. Vous pouvez dès maintenant vous connecter
+        avec l'email et le mot de passe que vous avez choisis.
     </p>
 
-    <flux:button href="https://{{ \Illuminate\Support\Str::slug(request()->session()->get('onboarding_company', '')) }}.{{ config('app.central_domain') }}/login"
-        variant="primary" class="!bg-amber-400 !text-neutral-950 hover:!bg-amber-300">
-        Accéder à mon espace
+    <flux:button href="{{ route('home') }}" variant="primary" class="!bg-amber-400 !text-neutral-950 hover:!bg-amber-300">
+        Accéder à la page d'accueil
     </flux:button>
 </div>
